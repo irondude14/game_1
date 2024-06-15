@@ -9,6 +9,7 @@ fn main() {
         .add_systems(Startup, spawn_cam)
         .add_systems(Startup, spawn_player)
         .add_systems(Startup, spawn_map)
+        .add_systems(Startup, spawn_background)
         .add_systems(Update, ground_detection) // Ensure ground detection runs early
         .add_systems(Update, animate_sprite)
         .add_systems(Update, move_player)
@@ -51,6 +52,24 @@ fn spawn_map(mut commands: Commands) {
             ..Default::default()
         },
         HitBox(Vec2::new(32., 32.)),
+    ));
+}
+
+fn spawn_background(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // Load the background texture
+    let background_texture_handle = asset_server.load("Background/Yellow.png");
+
+    // Create the background sprite
+    commands.spawn((
+        SpriteBundle {
+            transform: Transform {
+                translation: Vec3::new(0.0, 0.0, -1.0), // Ensure the background is behind other objects
+                scale: Vec3::new(800.0, 600.0, 1.0),    // Adjust the scale to cover the screen
+                ..Default::default()
+            },
+            texture: background_texture_handle,
+            ..Default::default()
+        },
     ));
 }
 
