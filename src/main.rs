@@ -15,8 +15,9 @@ fn main() {
         .add_systems(Update, move_player)
         .add_systems(Update, player_jump)
         .add_systems(Update, player_fall)
-        .add_systems(Update, change_player_animation) // Ensure animation change runs last
-        .init_resource::<PlayerAnimations>()
+        .add_systems(Update, change_player_animation)
+        .add_systems(Update, get_collectable) // Ensure animation change runs last
+        .init_resource::<Animations>()
         .init_resource::<TerrainSprites>()
         .register_type::<TextureAtlasSprite>()
         .run()
@@ -26,33 +27,67 @@ fn spawn_cam(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn spawn_map(mut commands: Commands) {
-
-    // let ground_texture = asset_server.load("Items/Terrain/Terrain.pn");
+fn spawn_map(mut commands: Commands, animations: Res<Animations>, terrain: Res<TerrainSprites>) {
 
     commands.spawn((
-        SpriteBundle {
+        SpriteSheetBundle {
             transform: Transform::from_translation(Vec3::NEG_Y * 16.),
-            sprite: Sprite { custom_size: Some(Vec2::new(200., 5.)),
+            sprite: TextureAtlasSprite { custom_size: Some(Vec2::new(168., 16.)),
                 color: Color::WHITE,
-                // texture: Some(ground_texture),
+                index: TerrainType::GoldStraight as usize,
                 ..Default::default()
             },
             ..Default::default()
         },
-        HitBox(Vec2::new(200., 5.)),
-    ));
-    commands.spawn((
-        SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(100., 25., 0.)),
-            sprite: Sprite { custom_size: Some(Vec2::new(32., 32.)),
+        HitBox(Vec2::new(200., 16.)),
+    )).with_children(|p| {
+        p.spawn(SpriteSheetBundle {
+            transform: Transform::from_translation(Vec3::X * 92.),
+            sprite: TextureAtlasSprite { custom_size: Some(Vec2::new(16., 16.)),
                 color: Color::WHITE,
+                index: TerrainType::GoldRightEnd as usize,
                 ..Default::default()
             },
+            texture_atlas: terrain.get_atlas(),
+            ..Default::default()
+        });
+        p.spawn(SpriteSheetBundle {
+            transform: Transform::from_translation(Vec3::NEG_X * 92.),
+            sprite: TextureAtlasSprite { custom_size: Some(Vec2::new(16., 16.)),
+                color: Color::WHITE,
+                index: TerrainType::GoldLeftEnd as usize,
+                ..Default::default()
+            },
+            texture_atlas: terrain.get_atlas(),
+            ..Default::default()
+        });
+    });
+    commands.spawn((
+        SpriteSheetBundle {
+            transform: Transform::from_translation(Vec3::new(100., 25., 0.)),
+            sprite: TextureAtlasSprite { custom_size: Some(Vec2::new(32., 32.)),
+                color: Color::WHITE,
+                index: TerrainType::GoldLeftEnd as usize,
+                ..Default::default()
+            },
+            texture_atlas: terrain.get_atlas(),
             ..Default::default()
         },
         HitBox(Vec2::new(32., 32.)),
     ));
+    if let Some((texture_atlas, animation)) = animations.get(Animation::Apple) {
+        commands.spawn((
+            SpriteSheetBundle {
+                transform: Transform::from_translation(Vec3::new(32., 16., 0.)),
+                texture_atlas,
+                ..Default::default()
+            },
+            HitBox(Vec2::new(32., 32.)),
+            animation,
+            FrameTime(0.0),
+            Trigger,
+        ));
+    }
 }
 
 fn spawn_background(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -79,18 +114,18 @@ fn spawn_background(mut commands: Commands, asset_server: Res<AssetServer>) {
 struct Player;
 
 
-fn spawn_player(mut commands: Commands, animations: Res<PlayerAnimations>,) {
-    let Some((texture_atlas, animation)) = animations.get(Animation::Idle) else {error!("Failed to find animation: Idle"); return;};
-commands.spawn((SpriteSheetBundle {
+fn spawn_player(mut commands: Commands, animations: Res<Animations>,) {
+    let Some((texture_atlas, animation)) = animations.get(Animation::PlayerIdle) else {error!("Failed to find animation: Idle"); return;};
+    commands.spawn((SpriteSheetBundle {
     texture_atlas,
     sprite: TextureAtlasSprite {index:0, ..Default::default()},
     ..Default::default()
-}, Player, 
-animation,
-FrameTime(0.0),
-Grounded(true),
-HitBox(Vec2::splat(32.)),
-));
+    },  Player, 
+        animation,
+        FrameTime(0.0),
+        Grounded(true),
+        HitBox(Vec2::new(18., 32.)),
+    ));
 }
 
 #[derive(Component, Clone, Copy)]
@@ -123,7 +158,7 @@ const MOVE_SPEED: f32 = 100.;
 fn move_player(
     mut commands: Commands,
     mut player: Query<(Entity, &mut Transform, &Grounded, &HitBox), With<Player>>,
-    hitboxs: Query<(&HitBox, &Transform), Without<Player>>,
+    hitboxes: Query<(&HitBox, &Transform), (Without<Player>,Without<Trigger>)>,
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
 ) {
@@ -139,7 +174,7 @@ fn move_player(
         return;
     };
     let new_pos = p_offset.translation + Vec3::X * delay;
-    for (&hitbox, offset) in &hitboxs {
+    for (&hitbox, offset) in &hitboxes {
         if check_hit(p_hitbox, new_pos, hitbox, offset.translation) {return;}
     }
     p_offset.translation = new_pos;
@@ -149,7 +184,7 @@ fn change_player_animation(
     mut player: Query<(&mut Handle<TextureAtlas>, &mut SpriteAnimation, &mut TextureAtlasSprite), With<Player>>,
     player_jump: Query<(Option<&Jump>, &Grounded), With<Player>>,
     input: Res<Input<KeyCode>>,
-    animations: Res<PlayerAnimations>,
+    animations: Res<Animations>,
 ) {
     let (mut atlas, mut animation, mut sprite) = player.single_mut();
     let (jump, grounded) = player_jump.single();
@@ -167,15 +202,15 @@ fn change_player_animation(
     let set = 
     //Jumping if jump
     if jump.is_some() {
-        Animation::Jump
+        Animation::PlayerJump
     //Falling if no on ground
     } else if !grounded.0 {
-        Animation::Fall
+        Animation::PlayerFall
     // if any move keys pressed set run sprite
     } else if input.any_pressed([KeyCode::A, KeyCode::Left, KeyCode::D, KeyCode::Right]) {
-        Animation::Run
+        Animation::PlayerRun
     } else {
-        Animation::Idle
+        Animation::PlayerIdle
     };
     let Some((new_atlas, new_animation)) = animations.get(set) else {error!("No Animation Jump Loaded"); return;};
     *atlas = new_atlas;
@@ -206,7 +241,7 @@ fn player_jump(
 
 fn player_fall(
     mut player: Query<(&mut Transform, &HitBox, &mut Grounded), (With<Player>, Without<Jump>)>,
-    hitboxes: Query<(&HitBox, &Transform), Without<Player>>,
+    hitboxes: Query<(&HitBox, &Transform), (Without<Player>, Without<Trigger>)>,
     time: Res<Time>,
 ) {
     let Ok((mut p_offset, &p_hitbox, mut grounded)) = player.get_single_mut() else { return; };
@@ -219,7 +254,7 @@ fn player_fall(
         if check_hit(p_hitbox, new_pos, hitbox, offset.translation) {
             is_on_ground = true;
             grounded.0 = true;
-            p_offset.translation.y = offset.translation.y + (hitbox.0.y + p_hitbox.0.y) / 2.0; // Snap player to the top of the hitbox
+            p_offset.translation.y = offset.translation.y + (hitbox.0.y + p_hitbox.0.y) / 2.0; 
             break;
         }
     }
@@ -254,53 +289,104 @@ fn ground_detection(
 struct HitBox(Vec2);
 
 fn check_hit(hitbox: HitBox, offset: Vec3, other_hitbox: HitBox, other_offset: Vec3) -> bool {
-    let h_size = hitbox.0.y /2.;
-    let oh_size = other_hitbox.0.y /2.;
-    let w_size = hitbox.0.x /2.;
-    let ow_size = other_hitbox.0.x /2.;
-
+    let h_size = hitbox.0.y / 2.;
+    let oh_size = other_hitbox.0.y / 2.;
+    let w_size = hitbox.0.x / 2.;
+    let ow_size = other_hitbox.0.x / 2.;
     offset.x + w_size > other_offset.x - ow_size && offset.x - w_size < other_offset.x + ow_size &&
     offset.y + h_size > other_offset.y - oh_size && offset.y - h_size < other_offset.y + oh_size
 }
 
+#[derive(Component)]
+struct Trigger;
+
+
+fn get_collectable(
+    player: Query<(&Transform, &HitBox), With<Player>>,
+    triggers: Query<(Entity, &Transform, &HitBox), (With<Trigger>, Without<Player>)>,
+    mut commands: Commands,
+) {
+    let (p_transform, &p_hitbox) = player.single();
+    for (entity, t_transform, &t_hitbox) in &triggers {
+        if check_hit(p_hitbox, p_transform.translation, t_hitbox, t_transform.translation) {
+            commands.entity(entity).despawn();
+        }
+    }
+
+}
+
+
 #[derive(Resource)]
-struct PlayerAnimations {
+struct Animations {
     map: HashMap<Animation, (Handle<TextureAtlas>, SpriteAnimation)>
 }
 
-impl FromWorld for PlayerAnimations {
+impl FromWorld for Animations {
     fn from_world(world: &mut World) -> Self {
-        let mut map = PlayerAnimations {map: HashMap::new()};
-        let asset_server = world.resource::<AssetServer>();
-        let idle_atlas = TextureAtlas::from_grid(
-            asset_server.load("Main Characters/Mask Dude/Idle (32x32).png"),
-            Vec2::splat(32.),
-            11, 1, None, None);
-        let run_atlas = TextureAtlas::from_grid(
-            asset_server.load("Main Characters/Mask Dude/Run (32x32).png"),
-            Vec2::splat(32.),
-            12, 1, None, None);
+        let mut map = Animations {map: HashMap::new()};
+        world.resource_scope(|world, mut texture_atlas: Mut<Assets<TextureAtlas>>| {
+            let asset_server = world.resource::<AssetServer>();
+            let idle_atlas = TextureAtlas::from_grid(
+                asset_server.load("Main Characters/Mask Dude/Idle (32x32).png"),
+                Vec2::splat(32.),
+                11, 1, None, None);
+            map.add(Animation::PlayerIdle, texture_atlas.add(idle_atlas), SpriteAnimation { len: 11, frame_time: 1./20. });
+
+            let run_atlas = TextureAtlas::from_grid(
+                asset_server.load("Main Characters/Mask Dude/Run (32x32).png"),
+                Vec2::splat(32.),
+                12, 1, None, None);
+            map.add(Animation::PlayerRun, texture_atlas.add(run_atlas), SpriteAnimation { len: 12, frame_time: 1./20. });
+
             let jump_atlas = TextureAtlas::from_grid(
                 asset_server.load("Main Characters/Mask Dude/Jump (32x32).png"),
                 Vec2::splat(32.),
                 1, 1, None, None);
+            map.add(Animation::PlayerJump, texture_atlas.add(jump_atlas), SpriteAnimation { len: 1, frame_time: 1. });
+
             let fall_atlas = TextureAtlas::from_grid(
                 asset_server.load("Main Characters/Mask Dude/Fall (32x32).png"),
                 Vec2::splat(32.),
                 1, 1, None, None);
-        let mut texture_atlas = world.resource_mut::<Assets<TextureAtlas>>();
-        map.add(Animation::Idle, texture_atlas.add(idle_atlas),
-        SpriteAnimation {len: 11, frame_time: 1./10.});
-        map.add(Animation::Run, texture_atlas.add(run_atlas),
-        SpriteAnimation {len: 12, frame_time: 1./10.});
-        map.add(Animation::Jump, texture_atlas.add(jump_atlas), SpriteAnimation { len: 1, frame_time: 1. });
-        map.add(Animation::Fall, texture_atlas.add(fall_atlas), SpriteAnimation { len: 1, frame_time: 1. });
+            map.add(Animation::PlayerFall, texture_atlas.add(fall_atlas), SpriteAnimation { len: 1, frame_time: 1. });
+
+            let strawberry_atlas = TextureAtlas::from_grid(
+                asset_server.load("Items/Fruits/Apple.png"),
+                Vec2::splat(32.),
+                17, 1, None, None);
+            map.add(Animation::Apple, texture_atlas.add(strawberry_atlas), SpriteAnimation { len: 17, frame_time: 1./20. });
+        });
+        // let mut map = Animations {map: HashMap::new()};
+        // let asset_server = world.resource::<AssetServer>();
+        // let idle_atlas = TextureAtlas::from_grid(
+        //     asset_server.load("Main Characters/Mask Dude/Idle (32x32).png"),
+        //     Vec2::splat(32.),
+        //     11, 1, None, None);
+        // let run_atlas = TextureAtlas::from_grid(
+        //     asset_server.load("Main Characters/Mask Dude/Run (32x32).png"),
+        //     Vec2::splat(32.),
+        //     12, 1, None, None);
+        //     let jump_atlas = TextureAtlas::from_grid(
+        //         asset_server.load("Main Characters/Mask Dude/Jump (32x32).png"),
+        //         Vec2::splat(32.),
+        //         1, 1, None, None);
+        //     let fall_atlas = TextureAtlas::from_grid(
+        //         asset_server.load("Main Characters/Mask Dude/Fall (32x32).png"),
+        //         Vec2::splat(32.),
+        //         1, 1, None, None);
+        // let mut texture_atlas = world.resource_mut::<Assets<TextureAtlas>>();
+        // map.add(Animation::Idle, texture_atlas.add(idle_atlas),
+        // SpriteAnimation {len: 11, frame_time: 1./10.});
+        // map.add(Animation::Run, texture_atlas.add(run_atlas),
+        // SpriteAnimation {len: 12, frame_time: 1./10.});
+        // map.add(Animation::Jump, texture_atlas.add(jump_atlas), SpriteAnimation { len: 1, frame_time: 1. });
+        // map.add(Animation::Fall, texture_atlas.add(fall_atlas), SpriteAnimation { len: 1, frame_time: 1. });
 
         map
     }
 }
 
-impl PlayerAnimations {
+impl Animations {
     fn add(&mut self, id: Animation, handle: Handle<TextureAtlas>, animation: SpriteAnimation) {
         self.map.insert(id, (handle, animation));
     }
@@ -311,10 +397,11 @@ impl PlayerAnimations {
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 enum Animation {
-    Run,
-    Idle,
-    Jump,
-    Fall,
+    PlayerRun,
+    PlayerIdle,
+    PlayerJump,
+    PlayerFall,
+    Apple,
 }
 
 #[derive(Resource)]
@@ -333,9 +420,9 @@ impl TerrainSprites {
 impl FromWorld for TerrainSprites {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.resource::<AssetServer>();
-        let texture_atles = TextureAtlas::from_grid(asset_server.load("Terrain/Terrain (16x16).png"), Vec2::splat(16.), 22, 11, None, None);
+        let texture_atlas = TextureAtlas::from_grid(asset_server.load("Terrain/Terrain (16x16).png"), Vec2::splat(16.), 22, 11, None, None);
         let mut assets = world.resource_mut::<Assets<TextureAtlas>>();
-        TerrainSprites::new(assets.add(texture_atles))
+        TerrainSprites::new(assets.add(texture_atlas))
     }
 }
 
