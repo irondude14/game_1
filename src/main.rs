@@ -4,7 +4,7 @@ use bevy_editor_pls::prelude::*;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
         .add_plugins(EditorPlugin::default())
         .add_systems(Startup, spawn_cam)
         .add_systems(Startup, spawn_player)
@@ -16,6 +16,8 @@ fn main() {
         .add_systems(Update, player_fall)
         .add_systems(Update, change_player_animation) // Ensure animation change runs last
         .init_resource::<PlayerAnimations>()
+        .init_resource::<TerrainSprites>()
+        .register_type::<TextureAtlasSprite>()
         .run()
 }
 
@@ -24,11 +26,15 @@ fn spawn_cam(mut commands: Commands) {
 }
 
 fn spawn_map(mut commands: Commands) {
+
+    // let ground_texture = asset_server.load("Items/Terrain/Terrain.pn");
+
     commands.spawn((
         SpriteBundle {
             transform: Transform::from_translation(Vec3::NEG_Y * 16.),
             sprite: Sprite { custom_size: Some(Vec2::new(200., 5.)),
                 color: Color::WHITE,
+                // texture: Some(ground_texture),
                 ..Default::default()
             },
             ..Default::default()
@@ -167,13 +173,14 @@ const FALL_SPEED: f32 = 98.0;
 fn player_jump(
     mut commands: Commands,
     mut player: Query<(Entity, &mut Transform, &mut Jump), With<Player>>,
+    input: Res<Input<KeyCode>>,
     time: Res<Time>,
 ) {
     let Ok((player, mut transform, mut jump)) = player.get_single_mut() else { return; };
     let jump_power = (time.delta_seconds() * FALL_SPEED * 2.0).min(jump.0);
-    jump.0 -= jump_power;
     transform.translation.y += jump_power;
-    if jump.0 <= 0.0 {
+    jump.0 -= if input.any_pressed([KeyCode::W, KeyCode::Up, KeyCode::Space]) {jump_power} else {jump_power * 2.};
+    if jump.0 <= 0. {
         commands.entity(player).remove::<Jump>();
     }
 }
@@ -289,4 +296,33 @@ enum Animation {
     Idle,
     Jump,
     Fall,
+}
+
+#[derive(Resource)]
+struct TerrainSprites(Handle<TextureAtlas>);
+
+impl TerrainSprites {
+    fn new(handle: Handle<TextureAtlas>) -> TerrainSprites {
+        TerrainSprites(handle)
+    }
+
+    fn get_atlas(&self) -> Handle<TextureAtlas> {
+        self.0.clone()
+    }
+}
+
+impl FromWorld for TerrainSprites {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+        let texture_atles = TextureAtlas::from_grid(asset_server.load("Terrain/Terrain (16x16).png"), Vec2::splat(16.), 22, 11, None, None);
+        let mut assets = world.resource_mut::<Assets<TextureAtlas>>();
+        TerrainSprites::new(assets.add(texture_atles))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum TerrainType {
+    GoldLeftEnd = 193,
+    GoldStraight = 194,
+    GoldRightEnd = 195,
 }
