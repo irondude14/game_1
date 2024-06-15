@@ -37,6 +37,7 @@ fn spawn_map(mut commands: Commands, animations: Res<Animations>, terrain: Res<T
                 index: TerrainType::GoldStraight as usize,
                 ..Default::default()
             },
+            texture_atlas: terrain.get_atlas(),
             ..Default::default()
         },
         HitBox(Vec2::new(200., 16.)),
